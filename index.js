@@ -8,7 +8,9 @@ const mongoose = require("mongoose");
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
-    connectionStateRecovery: {}
+    connectionStateRecovery: {},
+    ackTimeout: 10000,
+    retries: 3
 });
 
 async function connectToMongo() {
@@ -48,14 +50,21 @@ io.on("connection", async (socket) => {
         }
     }
 
-    socket.on("chat message", async (msg) => {
+    socket.on("chat message", async (msg, clientOffset, callback) => {
         try {
-            const message = new Message({ content: msg });
+            const message = new Message(
+                { content: msg, clientOffset: clientOffset }
+            );
             const savedMessage = await message.save();
 
             // IMPORTANT: Emit the content AND the new _id to all clients
             io.emit("chat message", savedMessage.content, savedMessage._id);
+            callback();
         } catch (err) {
+            if (err.code === 11000) {
+                // Duplicate message — already stored, just acknowledge
+                callback();
+            }
             console.log("Save Error:", err);
         }
     });
